@@ -30,3 +30,5 @@ replay_pid*
 build
 bin
 .env
+# Gradle Wrapper
+!gradle/wrapper/gradle-wrapper.jar
