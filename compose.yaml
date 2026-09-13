@@ -12,7 +12,7 @@ services:
       - "1883:1883" # MQTT acceptor
       - "8161:8161"   # Web console
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8161"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8161/console || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
