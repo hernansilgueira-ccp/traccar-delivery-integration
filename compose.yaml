@@ -96,7 +96,30 @@ services:
     networks:
       - fleet-net
     restart: unless-stopped
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres-delivery
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-delivery}
+      POSTGRES_USER: ${POSTGRES_USER:-delivery}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-delivery123}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-delivery-data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-delivery} -d ${POSTGRES_DB:-delivery}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fleet-net
+    restart: unless-stopped
 
 networks:
   fleet-net:
     driver: bridge
+
+volumes:
+  postgres-delivery-data:
