@@ -1,21 +1,27 @@
 services:
+
   artemis:
     image: apache/activemq-artemis:latest-alpine
     container_name: artemis-fleet
     environment:
-      - ANONYMOUS_LOGIN=true
-      - ARTEMIS_USER
-      - ARTEMIS_PASSWORD
+      ANONYMOUS_LOGIN: "true"
+      ARTEMIS_USER: ${ARTEMIS_USER:-admin}
+      ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     ports:
-      - "5672:5672"   # AMQP 1.0 acceptor
-      - "61616:61616" # Core/OpenWire acceptor
-      - "1883:1883" # MQTT acceptor
-      - "8161:8161"   # Web console
+      - "5672:5672"     # AMQP 1.0
+      - "61616:61616"   # Core/OpenWire
+      - "1883:1883"     # MQTT
+      - "8161:8161"     # Consola web
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8161/console || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider http://localhost:8161/console || exit 1"
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
     networks:
       - fleet-net
     restart: unless-stopped
@@ -24,19 +30,14 @@ services:
     image: traccar/traccar:latest
     container_name: traccar-fleet
     ports:
-      - "8082:8082"   # Web UI / REST API
-      - "5001:5001"   # gps103 protocol
-      - "5002:5002"   # TK103 protocol
-      - "5055:5055"   # OsmAnd protocol (used for GPS ping simulation)
+      - "8082:8082"     # Interfaz web y API REST
+      - "5001:5001"     # Protocolo gps103
+      - "5002:5002"     # Protocolo TK103
+      - "5055:5055"     # Protocolo OsmAnd
     volumes:
       - ./traccar/traccar.xml:/opt/traccar/conf/traccar.xml:ro
-    #depends_on:
-    #  artemis:
-    #    condition: service_healthy
     environment:
-      - CONFIG_USE_ENVIRONMENT_VARIABLES=true
-      - DATABASE_USER
-      - DATABASE_PASSWORD
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
     networks:
       - fleet-net
     restart: unless-stopped
@@ -49,11 +50,11 @@ services:
         m2-cache: ${HOME}/.m2
     container_name: broker-fleet
     environment:
-      - ARTEMIS_AMQP_URL=${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
-      - ARTEMIS_USER
-      - ARTEMIS_PASSWORD
+      ARTEMIS_AMQP_URL: ${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
+      ARTEMIS_USER: ${ARTEMIS_USER:-admin}
+      ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     ports:
-      - "8080:8080"   # HTTP endpoint for Traccar forwards
+      - "8080:8080"     # Recepción HTTP de mensajes de Traccar
     depends_on:
       artemis:
         condition: service_healthy
@@ -69,9 +70,9 @@ services:
         m2-cache: ${HOME}/.m2
     container_name: positions-consumer-fleet
     environment:
-      - ARTEMIS_AMQP_URL=${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
-      - ARTEMIS_USER
-      - ARTEMIS_PASSWORD
+      ARTEMIS_AMQP_URL: ${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
+      ARTEMIS_USER: ${ARTEMIS_USER:-admin}
+      ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     depends_on:
       artemis:
         condition: service_healthy
@@ -87,32 +88,58 @@ services:
         m2-cache: ${HOME}/.m2
     container_name: events-consumer-fleet
     environment:
-      - ARTEMIS_AMQP_URL=${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
-      - ARTEMIS_USER
-      - ARTEMIS_PASSWORD
+      ARTEMIS_AMQP_URL: ${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
+      ARTEMIS_USER: ${ARTEMIS_USER:-admin}
+      ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     depends_on:
       artemis:
         condition: service_healthy
     networks:
       - fleet-net
     restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     container_name: postgres-delivery
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-delivery}
-      POSTGRES_USER: ${POSTGRES_USER:-delivery}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-delivery123}
+      POSTGRES_DB: delivery
+      POSTGRES_USER: delivery
+      POSTGRES_PASSWORD: delivery123
     ports:
       - "5433:5432"
     volumes:
       - postgres-delivery-data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-delivery} -d ${POSTGRES_DB:-delivery}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U delivery -d delivery"
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+    networks:
+      - fleet-net
+    restart: unless-stopped
+
+  delivery-service:
+    build:
+      context: .
+      dockerfile: delivery-service/Dockerfile
+      additional_contexts:
+        m2-cache: ${HOME}/.m2
+    container_name: delivery-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/delivery
+      DB_USER: delivery
+      DB_PASSWORD: delivery123
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - fleet-net
     restart: unless-stopped

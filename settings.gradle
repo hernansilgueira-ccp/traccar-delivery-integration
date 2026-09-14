@@ -1,2 +1,8 @@
-rootProject.name = 'traccar-fleet-integration'
-include 'common', 'broker', 'mediator', 'positions-consumer', 'events-consumer'
+rootProject.name = 'traccar-delivery-integration'
+
+include 'common'
+include 'broker'
+include 'mediator'
+include 'positions-consumer'
+include 'events-consumer'
+include 'delivery-service'

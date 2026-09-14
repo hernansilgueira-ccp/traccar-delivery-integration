@@ -1,0 +1,15 @@
+description = 'Servicio de pedidos, tracking y orquestación del delivery'
+
+dependencies {
+    implementation project(':common')
+
+    implementation 'org.apache.camel:camel-platform-http'
+    implementation 'org.apache.camel:camel-platform-http-main'
+    implementation 'org.apache.camel:camel-jdbc'
+
+    implementation 'org.postgresql:postgresql:42.7.7'
+}
+
+application {
+    mainClass = 'org.example.fleet.delivery.MainApp'
+}

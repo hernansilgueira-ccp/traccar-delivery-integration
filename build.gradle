@@ -51,8 +51,13 @@ subprojects {
 }
 
 // Application and fat-jar assembly only for service modules (not common library)
-configure([project(':broker'), project(':positions-consumer'), project(':events-consumer'), project(':mediator')]) {
-    apply plugin: 'application'
+configure([
+    project(':broker'),
+    project(':positions-consumer'),
+    project(':events-consumer'),
+    project(':mediator'),
+    project(':delivery-service')
+]) {    apply plugin: 'application'
 
     tasks.named('jar') {
         archiveBaseName = project.name
