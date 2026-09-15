@@ -6,6 +6,7 @@ dependencies {
     implementation 'org.apache.camel:camel-platform-http'
     implementation 'org.apache.camel:camel-platform-http-main'
     implementation 'org.apache.camel:camel-jdbc'
+    implementation 'org.apache.camel:camel-jackson'
 
     implementation 'org.postgresql:postgresql:42.7.7'
 }

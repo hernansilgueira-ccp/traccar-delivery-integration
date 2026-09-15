@@ -8,9 +8,9 @@ public class HealthRoute extends RouteBuilder {
     @Override
     public void configure() {
         restConfiguration()
-                .component("platform-http")
-                .host("0.0.0.0")
-                .port(8081);
+        .component("platform-http")
+        .host("0.0.0.0")
+        .port(8080);
 
         rest("/health")
                 .get()
