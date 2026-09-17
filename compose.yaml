@@ -8,10 +8,10 @@ services:
       ARTEMIS_USER: ${ARTEMIS_USER:-admin}
       ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     ports:
-      - "5672:5672"     # AMQP 1.0
-      - "61616:61616"   # Core/OpenWire
-      - "1883:1883"     # MQTT
-      - "8161:8161"     # Consola web
+      - "5672:5672"
+      - "61616:61616"
+      - "1883:1883"
+      - "8161:8161"
     healthcheck:
       test:
         [
@@ -30,10 +30,10 @@ services:
     image: traccar/traccar:latest
     container_name: traccar-fleet
     ports:
-      - "8082:8082"     # Interfaz web y API REST
-      - "5001:5001"     # Protocolo gps103
-      - "5002:5002"     # Protocolo TK103
-      - "5055:5055"     # Protocolo OsmAnd
+      - "8082:8082"
+      - "5001:5001"
+      - "5002:5002"
+      - "5055:5055"
     volumes:
       - ./traccar/traccar.xml:/opt/traccar/conf/traccar.xml:ro
     environment:
@@ -54,7 +54,7 @@ services:
       ARTEMIS_USER: ${ARTEMIS_USER:-admin}
       ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     ports:
-      - "8080:8080"     # Recepción HTTP de mensajes de Traccar
+      - "8080:8080"
     depends_on:
       artemis:
         condition: service_healthy
@@ -135,10 +135,15 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/delivery
       DB_USER: delivery
       DB_PASSWORD: delivery123
+      ARTEMIS_AMQP_URL: ${ARTEMIS_AMQP_URL:-amqp://artemis:5672}
+      ARTEMIS_USER: ${ARTEMIS_USER:-admin}
+      ARTEMIS_PASSWORD: ${ARTEMIS_PASSWORD:-admin123}
     ports:
       - "8081:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      artemis:
         condition: service_healthy
     networks:
       - fleet-net
