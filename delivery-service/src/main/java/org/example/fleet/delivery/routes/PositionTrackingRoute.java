@@ -10,17 +10,55 @@ import org.example.fleet.model.VehiclePosition;
 
 public class PositionTrackingRoute extends RouteBuilder {
 
-    private static final double RADIO_TIERRA_M = 6_371_000.0;
+    private static final double RADIO_TIERRA_M =
+            6_371_000.0;
 
     @Override
     public void configure() {
 
+        configurarManejoErrores();
+        configurarSeguimiento();
+    }
+
+    private void configurarManejoErrores() {
+
+        onException(
+                RepartidorSinPedidoActivoException.class
+        )
+                .handled(true)
+
+                .setHeader(
+                        "errorReason",
+                        constant(
+                                "REPARTIDOR_SIN_PEDIDO_ACTIVO"
+                        )
+                )
+
+                .wireTap("direct:delivery-error")
+
+                .log(
+                        "No existe pedido activo para "
+                                + "el dispositivo "
+                                + "${header.deviceId}"
+                );
+
         onException(Exception.class)
                 .handled(true)
+
+                .setHeader(
+                        "errorReason",
+                        simple("${exception.message}")
+                )
+
+                .wireTap("direct:delivery-error")
+
                 .log(
-                        "Error procesando posición GPS: "
+                        "Error procesando posicion GPS: "
                                 + "${exception.message}"
                 );
+    }
+
+    private void configurarSeguimiento() {
 
         String buscarPedidoActivo = """
                 SELECT
@@ -53,62 +91,71 @@ public class PositionTrackingRoute extends RouteBuilder {
                     :?longitude,
                     :?speedKmh,
                     :?distanciaDestinoM,
-                    CAST(:?positionTimestamp AS timestamptz)
+                    CAST(
+                        :?positionTimestamp
+                        AS timestamptz
+                    )
                 )
                 ON CONFLICT (pedido_id)
                 DO UPDATE SET
-                    device_id = EXCLUDED.device_id,
-                    lat = EXCLUDED.lat,
-                    lon = EXCLUDED.lon,
-                    velocidad_kmh = EXCLUDED.velocidad_kmh,
+                    device_id =
+                        EXCLUDED.device_id,
+                    lat =
+                        EXCLUDED.lat,
+                    lon =
+                        EXCLUDED.lon,
+                    velocidad_kmh =
+                        EXCLUDED.velocidad_kmh,
                     distancia_destino_m =
-                            EXCLUDED.distancia_destino_m,
-                    timestamp = EXCLUDED.timestamp
+                        EXCLUDED.distancia_destino_m,
+                    timestamp =
+                        EXCLUDED.timestamp
                 """;
 
         String marcarComoCerca = """
-        WITH actualizado AS (
-            UPDATE pedidos
-            SET
-                estado = 'CERCA',
-                fecha_actualizacion = now()
-            WHERE id = :?pedidoId
-              AND estado = 'EN_CAMINO'
-              AND CAST(
-                    :?distanciaDestinoM
-                    AS double precision
-                  ) <= CAST(
-                    :?radioLlegadaM
-                    AS integer
-                  )
-            RETURNING id
-        )
-        INSERT INTO pedido_eventos (
-            pedido_id,
-            hito,
-            detalle
-        )
-        SELECT
-            id,
-            'PEDIDO_CERCA',
-            jsonb_build_object(
-                'estado',
-                'CERCA',
-                'distanciaDestinoM',
-                CAST(
-                    :?distanciaDestinoM
-                    AS double precision
+                WITH actualizado AS (
+                    UPDATE pedidos
+                    SET
+                        estado = 'CERCA',
+                        fecha_actualizacion = now()
+                    WHERE id = :?pedidoId
+                      AND estado = 'EN_CAMINO'
+                      AND CAST(
+                            :?distanciaDestinoM
+                            AS double precision
+                          ) <= CAST(
+                            :?radioLlegadaM
+                            AS integer
+                          )
+                    RETURNING id
                 )
-            )
-        FROM actualizado
-        ON CONFLICT (pedido_id, hito)
-        DO NOTHING
-        """;
+                INSERT INTO pedido_eventos (
+                    pedido_id,
+                    hito,
+                    detalle
+                )
+                SELECT
+                    id,
+                    'PEDIDO_CERCA',
+                    jsonb_build_object(
+                        'estado',
+                        'CERCA',
+                        'distanciaDestinoM',
+                        CAST(
+                            :?distanciaDestinoM
+                            AS double precision
+                        )
+                    )
+                FROM actualizado
+                ON CONFLICT (pedido_id, hito)
+                DO NOTHING
+                """;
 
         from(
                 "amqp:topic:vehicle.positions"
                         + "?subscriptionDurable=true"
-                        + "&durableSubscriptionName=delivery-tracking"
+                        + "&durableSubscriptionName="
+                        + "delivery-tracking"
                         + "&clientId=delivery-tracking"
         )
                 .routeId("delivery-position-tracking")
@@ -116,13 +163,12 @@ public class PositionTrackingRoute extends RouteBuilder {
                 .unmarshal()
                 .json(VehiclePosition.class)
 
-                .filter(simple("${body.valid} == true"))
-
                 .process(exchange -> {
                     VehiclePosition posicion =
-                            exchange.getMessage().getBody(
-                                    VehiclePosition.class
-                            );
+                            exchange.getMessage()
+                                    .getBody(
+                                            VehiclePosition.class
+                                    );
 
                     validarPosicion(posicion);
 
@@ -148,79 +194,95 @@ public class PositionTrackingRoute extends RouteBuilder {
 
                     exchange.getMessage().setHeader(
                             "positionTimestamp",
-                            timestampValido(posicion.timestamp())
+                            timestampValido(
+                                    posicion.timestamp()
+                            )
                     );
                 })
 
-                .setBody(constant(buscarPedidoActivo))
+                .setBody(
+                        constant(buscarPedidoActivo)
+                )
 
                 .to(
                         "jdbc:dataSource"
                                 + "?useHeadersAsParameters=true"
                 )
 
-                .choice()
+                .process(exchange -> {
+                    List<Map<String, Object>> pedidos =
+                            obtenerFilas(exchange);
 
-                    .when(simple("${body.size} == 0"))
+                    if (pedidos.isEmpty()) {
+                        throw new
+                                RepartidorSinPedidoActivoException(
+                                        "El repartidor no tiene "
+                                                + "un pedido activo"
+                                );
+                    }
 
-                        .log(
-                                "No existe pedido activo para "
-                                        + "el dispositivo ${header.deviceId}"
-                        )
+                    prepararSeguimiento(
+                            exchange,
+                            pedidos.get(0)
+                    );
+                })
 
-                        .stop()
+                .setBody(
+                        constant(guardarUltimaPosicion)
+                )
 
-                    .otherwise()
+                .to(
+                        "jdbc:dataSource"
+                                + "?useHeadersAsParameters=true"
+                )
 
-                        .process(exchange ->
-                                prepararSeguimiento(exchange)
-                        )
+                .setBody(
+                        constant(marcarComoCerca)
+                )
 
-                        .setBody(
-                                constant(guardarUltimaPosicion)
-                        )
+                .to(
+                        "jdbc:dataSource"
+                                + "?useHeadersAsParameters=true"
+                )
 
-                        .to(
-                                "jdbc:dataSource"
-                                        + "?useHeadersAsParameters=true"
-                        )
+                .setHeader(
+                        "hito",
+                        constant("PEDIDO_CERCA")
+                )
 
-                        .setBody(
-                                constant(marcarComoCerca)
-                        )
+                .wireTap(
+                        "direct:publicar-notificacion"
+                )
 
-                        .to(
-                                "jdbc:dataSource"
-                                        + "?useHeadersAsParameters=true"
-                        )
-
-                        .log(
-                                "Posición guardada: "
-                                        + "pedido=${header.pedidoId}, "
-                                        + "device=${header.deviceId}, "
-                                        + "distancia="
-                                        + "${header.distanciaDestinoM} m"
-                        )
-
-                .end();
+                .log(
+                        "Posicion guardada: "
+                                + "pedido="
+                                + "${header.pedidoId}, "
+                                + "device="
+                                + "${header.deviceId}, "
+                                + "distancia="
+                                + "${header.distanciaDestinoM} m"
+                );
     }
 
     private void prepararSeguimiento(
-            Exchange exchange
+            Exchange exchange,
+            Map<String, Object> pedido
     ) {
-        List<Map<String, Object>> pedidos =
-                obtenerFilas(exchange);
-
-        Map<String, Object> pedido = pedidos.get(0);
-
         String pedidoId =
-                String.valueOf(pedido.get("pedidoId"));
+                String.valueOf(
+                        pedido.get("pedidoId")
+                );
 
         double latDestino =
-                numero(pedido.get("latDestino"));
+                numero(
+                        pedido.get("latDestino")
+                );
 
         double lonDestino =
-                numero(pedido.get("lonDestino"));
+                numero(
+                        pedido.get("lonDestino")
+                );
 
         int radioLlegada =
                 ((Number) pedido.get("radioLlegadaM"))
@@ -240,12 +302,13 @@ public class PositionTrackingRoute extends RouteBuilder {
                         )
                 );
 
-        double distancia = calcularDistancia(
-                latitude,
-                longitude,
-                latDestino,
-                lonDestino
-        );
+        double distancia =
+                calcularDistancia(
+                        latitude,
+                        longitude,
+                        latDestino,
+                        lonDestino
+                );
 
         exchange.getMessage().setHeader(
                 "pedidoId",
@@ -268,14 +331,20 @@ public class PositionTrackingRoute extends RouteBuilder {
     ) {
         if (posicion == null) {
             throw new IllegalArgumentException(
-                    "El mensaje de posición está vacío"
+                    "El mensaje de posicion esta vacio"
             );
         }
 
         if (posicion.deviceId() == null
                 || posicion.deviceId().isBlank()) {
             throw new IllegalArgumentException(
-                    "La posición no contiene deviceId"
+                    "La posicion no contiene deviceId"
+            );
+        }
+
+        if (!posicion.valid()) {
+            throw new IllegalArgumentException(
+                    "La posicion GPS no es valida"
             );
         }
 
@@ -297,12 +366,14 @@ public class PositionTrackingRoute extends RouteBuilder {
     private String timestampValido(
             String timestamp
     ) {
-        if (timestamp == null || timestamp.isBlank()) {
+        if (timestamp == null
+                || timestamp.isBlank()) {
             return Instant.now().toString();
         }
 
         try {
-            return Instant.parse(timestamp).toString();
+            return Instant.parse(timestamp)
+                    .toString();
         } catch (Exception exception) {
             return Instant.now().toString();
         }
@@ -314,41 +385,57 @@ public class PositionTrackingRoute extends RouteBuilder {
             double latitudDestino,
             double longitudDestino
     ) {
-        double lat1 = Math.toRadians(latitudOrigen);
-        double lat2 = Math.toRadians(latitudDestino);
+        double lat1 =
+                Math.toRadians(latitudOrigen);
+
+        double lat2 =
+                Math.toRadians(latitudDestino);
 
         double diferenciaLatitud =
                 Math.toRadians(
-                        latitudDestino - latitudOrigen
+                        latitudDestino
+                                - latitudOrigen
                 );
 
         double diferenciaLongitud =
                 Math.toRadians(
-                        longitudDestino - longitudOrigen
+                        longitudDestino
+                                - longitudOrigen
                 );
 
         double a =
                 Math.sin(diferenciaLatitud / 2)
-                        * Math.sin(diferenciaLatitud / 2)
+                        * Math.sin(
+                                diferenciaLatitud / 2
+                        )
                         + Math.cos(lat1)
                         * Math.cos(lat2)
-                        * Math.sin(diferenciaLongitud / 2)
-                        * Math.sin(diferenciaLongitud / 2);
+                        * Math.sin(
+                                diferenciaLongitud / 2
+                        )
+                        * Math.sin(
+                                diferenciaLongitud / 2
+                        );
 
-        double c = 2 * Math.atan2(
-                Math.sqrt(a),
-                Math.sqrt(1 - a)
-        );
+        double c =
+                2 * Math.atan2(
+                        Math.sqrt(a),
+                        Math.sqrt(1 - a)
+                );
 
         return Math.round(
-                RADIO_TIERRA_M * c * 100.0
+                RADIO_TIERRA_M
+                        * c
+                        * 100.0
         ) / 100.0;
     }
 
     private double numero(Object valor) {
+
         if (!(valor instanceof Number numero)) {
             throw new IllegalArgumentException(
-                    "Valor numérico inválido: " + valor
+                    "Valor numerico invalido: "
+                            + valor
             );
         }
 
@@ -359,14 +446,26 @@ public class PositionTrackingRoute extends RouteBuilder {
     private List<Map<String, Object>> obtenerFilas(
             Exchange exchange
     ) {
-        Object body = exchange.getMessage().getBody();
+        Object body =
+                exchange.getMessage().getBody();
 
         if (!(body instanceof List<?>)) {
             throw new IllegalStateException(
-                    "La consulta no devolvió una lista"
+                    "La consulta no devolvio una lista"
             );
         }
 
         return (List<Map<String, Object>>) body;
+    }
+
+    private static class
+            RepartidorSinPedidoActivoException
+            extends RuntimeException {
+
+        RepartidorSinPedidoActivoException(
+                String mensaje
+        ) {
+            super(mensaje);
+        }
     }
 }

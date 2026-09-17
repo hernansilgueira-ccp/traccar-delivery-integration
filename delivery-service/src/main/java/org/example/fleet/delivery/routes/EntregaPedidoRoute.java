@@ -112,6 +112,17 @@ public class EntregaPedidoRoute extends RouteBuilder {
                             filas.get(0)
                     );
                 })
+                .setHeader(
+        "pedidoId",
+        simple("${body[id]}")
+)
+
+.setHeader(
+        "hito",
+        constant("PEDIDO_ENTREGADO")
+)
+
+.wireTap("direct:publicar-notificacion")
 
                 .marshal()
                 .json(JsonLibrary.Jackson)

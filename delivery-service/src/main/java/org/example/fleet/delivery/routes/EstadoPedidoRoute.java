@@ -111,6 +111,18 @@ public class EstadoPedidoRoute extends RouteBuilder {
                     );
                 })
 
+                .setHeader(
+        "pedidoId",
+        simple("${body[id]}")
+)
+
+.setHeader(
+        "hito",
+        constant("PEDIDO_EN_CAMINO")
+)
+
+.wireTap("direct:publicar-notificacion")
+
                 .marshal()
                 .json(JsonLibrary.Jackson)
 
