@@ -1,49 +1,34 @@
-Seguimiento de Pedidos por Delivery con Traccar, Camel y Artemis
+# Seguimiento de Pedidos por Delivery
 
-Extensión del proyecto base traccar-fleet-integration para resolver el Desafío 3: Seguimiento de Pedidos por Delivery por Coordenadas GPS.
+Integración de **Traccar**, **Apache Camel**, **ActiveMQ Artemis** y **PostgreSQL** para registrar pedidos, procesar posiciones GPS, calcular la distancia al destino y notificar los hitos de una entrega.
 
-El sistema recibe pedidos asignados a repartidores, procesa posiciones GPS producidas por Traccar, calcula la distancia al destino, actualiza automáticamente el estado del pedido y emite notificaciones PUSH simuladas sin duplicados.
+Proyecto desarrollado para el **Desafío 3 — Seguimiento de Pedidos por Delivery por Coordenadas GPS** de Integración de Sistemas II.
 
-Integrantes
+## Integrantes
 
-Hernan Silgueira
+- Hernan Silgueira
+- Antonio Aguero
+- Victor Martinez
 
-Antonio Aguero
+## Funcionalidades
 
-Victor Martinez
+- Registro y consulta de pedidos mediante API REST.
+- Inicio controlado de la entrega.
+- Recepción de posiciones GPS desde Traccar.
+- Correlación entre `deviceId` y el pedido activo.
+- Cálculo de distancia mediante la fórmula de Haversine.
+- Actualización de la última posición conocida.
+- Cambio automático de `EN_CAMINO` a `CERCA`.
+- Confirmación de entrega.
+- Consulta de tracking del pedido.
+- Notificaciones PUSH simuladas mediante Artemis.
+- Notificaciones idempotentes por pedido e hito.
+- Canal de errores para mensajes no procesables.
+- Pruebas unitarias del cálculo de distancia.
 
-Funcionalidades
+## Arquitectura
 
-Registro y consulta de pedidos.
-
-Repartidores precargados en PostgreSQL.
-
-Inicio controlado de una entrega.
-
-Recepción de posiciones GPS mediante Traccar y Apache Camel.
-
-Correlación entre deviceId y el pedido activo del repartidor.
-
-Cálculo geodésico de distancia mediante la fórmula Haversine.
-
-Actualización de la última posición conocida.
-
-Cambio automático de EN_CAMINO a CERCA al ingresar en el radio configurado.
-
-Confirmación de entrega.
-
-Endpoint de tracking para la aplicación cliente.
-
-Notificaciones PUSH simuladas mediante Artemis.
-
-Entrega única de notificaciones por pedido e hito.
-
-Canal de errores para mensajes no procesables.
-
-Pruebas unitarias del cálculo de distancia.
-
-Arquitectura
-
+```mermaid
 flowchart TD
     GPS[Dispositivo GPS] --> TR[Traccar]
     TR -->|HTTP JSON| BR[Broker Camel]
@@ -52,357 +37,131 @@ flowchart TD
     API[Sistema de pedidos] -->|REST| DS
     DS --> PG[(PostgreSQL)]
     DS -->|delivery.notifications| AR
-    AR --> NM[Push Mock]
+    AR --> PUSH[PUSH Mock]
     DS -->|delivery.errors| AR
     AR --> DLQ[DLQ Mock]
     APP[Aplicación cliente] -->|Tracking REST| DS
+```
 
-Decisión arquitectónica
+El módulo `delivery-service` actúa como **Process Manager** y orquesta el ciclo de vida:
 
-Se utiliza orquestación. El módulo delivery-service actúa como Process Manager y controla el ciclo de vida del pedido:
-
+```text
 RECIBIDO → EN_CAMINO → CERCA → ENTREGADO
-
-Esta decisión centraliza las reglas de transición, la correlación GPS, la persistencia, la generación de hitos y las notificaciones. Los demás componentes permanecen desacoplados y se comunican mediante REST o Artemis.
-
-El flujo GPS y las notificaciones son orientados a eventos. No se utiliza polling sobre PostgreSQL para detectar cambios.
-
-Flujo de negocio
-
-El sistema externo registra un pedido con un repartidor asignado.
-
-El pedido se almacena en estado RECIBIDO.
-
-PUT /pedidos/{id}/iniciar cambia el estado a EN_CAMINO.
-
-Se genera PEDIDO_EN_CAMINO y una notificación PUSH simulada.
-
-Traccar publica posiciones del repartidor.
-
-El broker transforma el payload al modelo canónico VehiclePosition.
-
-delivery-service correlaciona deviceId con el pedido activo.
-
-Se calcula la distancia al destino y se actualiza pedido_ultima_posicion.
-
-Si la distancia es menor o igual al radio configurado, el pedido pasa a CERCA.
-
-Se genera PEDIDO_CERCA y una notificación única.
-
-PUT /pedidos/{id}/entregar cambia el pedido a ENTREGADO.
-
-Se registra PEDIDO_ENTREGADO y se emite la notificación final.
-
-Tecnologías
-
-Java 21
-
-Apache Camel 4.8.0
-
-Gradle Wrapper 9.6.1
-
-ActiveMQ Artemis con AMQP 1.0
-
-Qpid JMS
-
-PostgreSQL 17
-
-Traccar
-
-Docker y Docker Compose
-
-JUnit 5
-
-Patrones EIP aplicados
-
-Patrón
-
-Ubicación
-
-Problema resuelto
-
-Messaging Gateway
-
-broker
-
-Expone HTTP y desacopla Traccar de Artemis.
-
-Content-Based Router
-
-IngestRoute
-
-Clasifica posiciones y eventos.
-
-Message Translator
-
-Traductores del broker
-
-Convierte el formato Traccar al modelo canónico.
-
-Canonical Data Model
-
-common
-
-Define VehiclePosition y VehicleEvent.
-
-Publish-Subscribe Channel
-
-vehicle.positions
-
-Distribuye cada posición a consumidores independientes.
-
-Durable Subscriber
-
-Consumidores AMQP
-
-Conserva las suscripciones durante desconexiones.
-
-Message Filter
-
-Procesamiento GPS
-
-Rechaza posiciones inválidas.
-
-Correlation Identifier
-
-pedidoId, deviceId, messageId
-
-Relaciona pedido, repartidor, posición y evento.
-
-Process Manager
-
-delivery-service
-
-Orquesta el ciclo de vida del pedido.
-
-Idempotent Receiver
-
-pedido_eventos
-
-Evita hitos y notificaciones duplicadas.
-
-Dead Letter Channel
-
-delivery.errors
-
-Recibe mensajes que no pueden procesarse.
-
-Wire Tap
-
-Notificaciones y errores
-
-Envía copias asíncronas sin bloquear el flujo principal.
-
-Canales Artemis
-
-Canal
-
-Tipo
-
-Productor
-
-Consumidor
-
-Responsabilidad
-
-ingest
-
-Queue
-
-Broker HTTP
-
-IngestRoute
-
-Entrada de forwards de Traccar.
-
-vehicle.positions
-
-Topic
-
-Broker
-
-Consumers y delivery-service
-
-Posiciones GPS canónicas.
-
-vehicle.events
-
-Topic
-
-Broker
-
-events-consumer
-
-Eventos canónicos de Traccar.
-
-delivery.notifications
-
-Queue
-
-delivery-service
-
-PUSH mock
-
-Notificaciones de hitos.
-
-delivery.errors
-
-Queue
-
-delivery-service
-
-DLQ mock
-
-Mensajes no procesables.
-
-Persistencia
-
-PostgreSQL contiene las siguientes tablas:
-
-repartidores: datos maestros precargados.
-
-pedidos: estado y datos de entrega.
-
-pedido_ultima_posicion: última posición conocida y distancia calculada.
-
-pedido_eventos: bitácora de hitos y control de notificaciones.
-
-Se conserva únicamente la última posición de cada pedido. Esta decisión reduce el crecimiento de la base y satisface la consulta de tracking. El flujo completo continúa disponible temporalmente en Artemis y en los logs.
-
-La restricción única (pedido_id, hito) impide duplicar eventos. También existe una restricción parcial que permite solamente un pedido activo por repartidor.
-
-Estrategia de notificación única
-
-Antes de publicar una notificación se ejecuta una operación atómica en PostgreSQL:
-
-Se busca el evento con notificado=false.
-
-Se actualiza a notificado=true mediante UPDATE ... RETURNING.
-
-Solo la ejecución que obtiene la fila publica en delivery.notifications.
-
-Los reintentos posteriores no recuperan filas y se omiten.
-
-Esta estrategia garantiza como máximo una notificación por pedido e hito, incluso si una posición GPS se reenvía.
-
-El PUSH se simula con un consumidor que registra en logs el pedido, hito, título, cuerpo, MSISDN y token FCM. El envío real a FCM/APNs queda fuera del alcance.
-
-Manejo de errores
-
-Las posiciones que no pueden correlacionarse o procesarse se publican en delivery.errors con:
-
-motivo;
-
-pedidoId, si existe;
-
-deviceId;
-
-coordenadas;
-
-timestamp de la posición;
-
-timestamp del error.
-
-Un consumidor DLQ simulado deja evidencia del mensaje. Los errores REST utilizan códigos 400, 404, 409 o 500, según corresponda.
-
-Puertos
-
-Servicio
-
-Puerto
-
-Broker HTTP
-
-8080
-
-Delivery Service
-
-8081
-
-Traccar Web/API
-
-8082
-
-Traccar OsmAnd
-
-5055
-
-Artemis AMQP
-
-5672
-
-Artemis Core/OpenWire
-
-61616
-
-Artemis MQTT
-
-1883
-
-Artemis Console
-
-8161
-
-PostgreSQL host
-
-5433
-
-Requisitos previos
-
-JDK 21.
-
-Docker Desktop.
-
-Docker Compose.
-
-Git.
-
-Windows PowerShell o una terminal compatible.
-
-Variables de entorno
-
-Valores predeterminados para desarrollo:
-
-ARTEMIS_AMQP_URL=amqp://artemis:5672
-ARTEMIS_USER=admin
-ARTEMIS_PASSWORD=admin123
-DB_URL=jdbc:postgresql://postgres:5432/delivery
-DB_USER=delivery
-DB_PASSWORD=delivery123
-
-En PowerShell debe existir HOME para compartir el caché Maven con Docker:
-
-$env:HOME = $env:USERPROFILE
-
-Compilación y ejecución
-
+```
+
+Las posiciones, notificaciones y errores se procesan mediante mensajería orientada a eventos. No se utiliza polling sobre PostgreSQL.
+
+## Tecnologías
+
+- Java 21
+- Apache Camel 4.8.0
+- Gradle Wrapper 9.6.1
+- ActiveMQ Artemis y AMQP 1.0
+- Qpid JMS
+- PostgreSQL 17
+- Traccar
+- Docker y Docker Compose
+- JUnit 5
+
+## Patrones EIP
+
+| Patrón | Implementación | Responsabilidad |
+|---|---|---|
+| Messaging Gateway | `broker` | Recibe HTTP y publica en Artemis. |
+| Content-Based Router | `IngestRoute` | Clasifica posiciones y eventos. |
+| Message Translator | Traductores del broker | Convierte el payload de Traccar al modelo canónico. |
+| Canonical Data Model | `common` | Define `VehiclePosition` y `VehicleEvent`. |
+| Publish-Subscribe Channel | `vehicle.positions` | Distribuye posiciones GPS. |
+| Durable Subscriber | Consumidores AMQP | Conserva las suscripciones. |
+| Message Filter | Tracking GPS | Rechaza posiciones inválidas. |
+| Correlation Identifier | `pedidoId`, `deviceId` | Relaciona pedidos, repartidores y eventos. |
+| Process Manager | `delivery-service` | Orquesta el ciclo de entrega. |
+| Idempotent Receiver | `pedido_eventos` | Evita eventos y notificaciones duplicadas. |
+| Dead Letter Channel | `delivery.errors` | Recibe mensajes no procesables. |
+| Wire Tap | Notificaciones y errores | Publica copias asíncronas. |
+
+## Canales de mensajería
+
+| Canal | Tipo | Responsabilidad |
+|---|---|---|
+| `ingest` | Queue | Entrada de forwards de Traccar. |
+| `vehicle.positions` | Topic | Posiciones GPS canónicas. |
+| `vehicle.events` | Topic | Eventos canónicos de Traccar. |
+| `delivery.notifications` | Queue | Notificaciones de hitos. |
+| `delivery.errors` | Queue | Mensajes no procesables. |
+
+## Persistencia
+
+PostgreSQL utiliza las siguientes tablas:
+
+- `repartidores`: datos maestros precargados.
+- `pedidos`: información y estado de cada entrega.
+- `pedido_ultima_posicion`: última posición y distancia calculada.
+- `pedido_eventos`: bitácora de hitos y control de notificaciones.
+
+La restricción única `(pedido_id, hito)` evita duplicar eventos. Un índice único parcial permite solamente un pedido activo por repartidor.
+
+Para publicar una notificación, el servicio ejecuta una operación atómica `UPDATE ... RETURNING` sobre un evento con `notificado=false`. Solamente la ejecución que reclama la fila publica el mensaje.
+
+## Puertos
+
+| Servicio | Puerto local |
+|---|---:|
+| Broker HTTP | 8080 |
+| Delivery Service | 8081 |
+| Traccar Web/API | 8082 |
+| Traccar OsmAnd | 5055 |
+| Artemis AMQP | 5672 |
+| Artemis Core/OpenWire | 61616 |
+| Artemis MQTT | 1883 |
+| Artemis Console | 8161 |
+| PostgreSQL | 5433 |
+
+## Ejecución
+
+Requisitos: JDK 21, Docker Desktop, Docker Compose y Git.
+
+```powershell
 git clone https://github.com/hernansilgueira-ccp/traccar-delivery-integration.git
 cd traccar-delivery-integration
+
 $env:HOME = $env:USERPROFILE
-.\gradlew.bat clean test
+./gradlew.bat clean test
 docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
+```
 
-Health check:
+### Health check
 
+```powershell
 Invoke-RestMethod -Uri "http://localhost:8081/health" -Method Get
+```
 
-Resultado:
+Respuesta esperada:
 
+```json
 {
   "status": "UP",
   "database": "UP"
 }
+```
 
-API REST
+## API REST
 
-Crear pedido
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/pedidos` | Crea un pedido en estado `RECIBIDO`. |
+| `GET` | `/pedidos` | Lista los pedidos. |
+| `GET` | `/pedidos/{id}` | Consulta un pedido. |
+| `PUT` | `/pedidos/{id}/iniciar` | Cambia de `RECIBIDO` a `EN_CAMINO`. |
+| `GET` | `/pedidos/{id}/tracking` | Consulta estado y última posición. |
+| `PUT` | `/pedidos/{id}/entregar` | Cambia de `CERCA` a `ENTREGADO`. |
 
-POST /pedidos
-Content-Type: application/json
+### Crear un pedido
 
+```json
 {
   "id": "PED-004",
   "clienteNombre": "Cliente Demo",
@@ -414,27 +173,11 @@ Content-Type: application/json
   "radioLlegadaM": 150,
   "repartidorDeviceId": "repartidor-01"
 }
+```
 
-Respuesta exitosa: 201 Created con estado RECIBIDO.
+### Respuesta de tracking
 
-Listar pedidos
-
-GET /pedidos
-
-Consultar pedido
-
-GET /pedidos/{id}
-
-Iniciar entrega
-
-PUT /pedidos/{id}/iniciar
-
-Transición permitida: RECIBIDO → EN_CAMINO.
-
-Consultar tracking
-
-GET /pedidos/{id}/tracking
-
+```json
 {
   "pedidoId": "PED-004",
   "estado": "CERCA",
@@ -446,141 +189,49 @@ GET /pedidos/{id}/tracking
     "timestamp": 1789604886279
   }
 }
+```
 
-posicion es null si todavía no existen reportes GPS.
+`posicion` es `null` si todavía no se recibieron reportes GPS.
 
-Confirmar entrega
+## Pruebas automatizadas
 
-PUT /pedidos/{id}/entregar
+```powershell
+./gradlew.bat clean test
+```
 
-Transición permitida: CERCA → ENTREGADO.
+Se incluyen cinco pruebas unitarias:
 
-Guía de prueba funcional
+1. Distancia cero para coordenadas iguales.
+2. Cálculo de una posición lejana.
+3. Simetría de la distancia.
+4. Posición dentro de un radio de 150 metros.
+5. Posición fuera del radio.
 
-1. Crear pedido
+Resultado comprobado: **5 pruebas, 0 fallos y 0 errores**.
 
-$pedido = @{
-    id = "PED-004"
-    clienteNombre = "Cliente Demo"
-    clienteMsisdn = "+595981000000"
-    clienteFcmId = "fcm-token-demo"
-    direccionTexto = "Asuncion"
-    latDestino = -25.2967
-    lonDestino = -57.6359
-    radioLlegadaM = 150
-    repartidorDeviceId = "repartidor-01"
-} | ConvertTo-Json
+## Evidencias
 
-Invoke-RestMethod `
-    -Uri "http://localhost:8081/pedidos" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $pedido
+| Evidencia | Comprobación |
+|---|---|
+| [01 — Build exitoso](docs/evidencias/01-build-successful.png) | Compilación completa del proyecto. |
+| [01b — Pruebas unitarias](docs/evidencias/01b-pruebas-unitarias.png) | Cinco pruebas sin fallos. |
+| [02 — Docker Compose](docs/evidencias/02-docker-compose-ps.png) | Contenedores en ejecución. |
+| [02b — Health check](docs/evidencias/02b-health-check.png) | Servicio y base de datos disponibles. |
+| [03 — Pedido recibido](docs/evidencias/03-pedido-recibido.png) | Creación en estado `RECIBIDO`. |
+| [04 — Pedido en camino](docs/evidencias/04-pedido-en-camino.png) | Transición a `EN_CAMINO`. |
+| [04b — PUSH en camino](docs/evidencias/04b-push-en-camino.png) | Notificación del inicio. |
+| [05 — Posición lejana](docs/evidencias/05-posicion-lejana.png) | Tracking fuera del radio. |
+| [06 — Pedido cerca](docs/evidencias/06-pedido-cerca.png) | Detección automática de cercanía. |
+| [07 — PUSH de cercanía](docs/evidencias/07-push-pedido-cerca.png) | Notificación `PEDIDO_CERCA`. |
+| [08 — Pedido entregado](docs/evidencias/08-pedido-entregado.png) | Transición a `ENTREGADO`. |
+| [09 — PUSH entregado](docs/evidencias/09-push-entregado.png) | Notificación final. |
+| [09b — Tracking final](docs/evidencias/09b-tracking-final.png) | Estado y posición finales. |
+| [10 — Canal de errores](docs/evidencias/10-delivery-errors.png) | Mensaje no correlacionable en `delivery.errors`. |
+| [11 — Idempotencia](docs/evidencias/11-idempotencia-eventos.png) | Un único registro por pedido e hito. |
 
-2. Iniciar entrega
+## Estructura principal
 
-Invoke-RestMethod `
-    -Uri "http://localhost:8081/pedidos/PED-004/iniciar" `
-    -Method Put
-
-3. Enviar posición GPS
-
-$fixTime = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-
-$posicion = @{
-    position = @{
-        deviceId = "repartidor-01"
-        latitude = -25.2967
-        longitude = -57.6359
-        speed = 10
-        course = 90
-        valid = $true
-        fixTime = $fixTime
-        attributes = @{ ignition = $true }
-    }
-} | ConvertTo-Json -Depth 5
-
-Invoke-RestMethod `
-    -Uri "http://localhost:8080/traccar/ingest" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $posicion
-
-4. Consultar tracking
-
-Invoke-RestMethod `
-    -Uri "http://localhost:8081/pedidos/PED-004/tracking" `
-    -Method Get |
-    ConvertTo-Json -Depth 5
-
-5. Confirmar entrega
-
-Invoke-RestMethod `
-    -Uri "http://localhost:8081/pedidos/PED-004/entregar" `
-    -Method Put
-
-6. Verificar eventos e idempotencia
-
-docker exec postgres-delivery `
-    psql -U delivery -d delivery `
-    -c "SELECT pedido_id, hito, notificado, timestamp FROM pedido_eventos WHERE pedido_id='PED-004' ORDER BY id;"
-
-7. Probar canal de errores
-
-Enviar una posición con deviceId=repartidor-99 y revisar:
-
-docker compose logs --since=2m delivery-service |
-    Select-String -Pattern "DLQ MOCK|REPARTIDOR_SIN_PEDIDO_ACTIVO"
-
-Pruebas automatizadas
-
-.\gradlew.bat clean test
-
-Actualmente se incluyen cinco pruebas unitarias para:
-
-distancia cero;
-
-cálculo de una posición lejana;
-
-simetría de distancia;
-
-posición dentro del radio de 150 metros;
-
-posición fuera del radio.
-
-Resultado esperado:
-
-BUILD SUCCESSFUL
-Pruebas: 5
-Fallos: 0
-Errores: 0
-
-Evidencias recomendadas
-
-Guardar en docs/evidencias/:
-
-01-build-successful.png
-
-02-docker-compose-ps.png
-
-03-pedido-recibido.png
-
-04-posicion-lejana.png
-
-05-pedido-cerca.png
-
-06-push-mock.png
-
-07-pedido-entregado.png
-
-08-eventos-idempotentes.png
-
-09-tracking-endpoint.png
-
-10-delivery-errors.png
-
-Estructura principal
-
+```text
 traccar-delivery-integration/
 ├── broker/
 ├── common/
@@ -588,51 +239,22 @@ traccar-delivery-integration/
 ├── events-consumer/
 ├── positions-consumer/
 ├── database/init/
-├── traccar/
 ├── docs/evidencias/
+├── traccar/
 ├── compose.yaml
 ├── build.gradle
 ├── settings.gradle
 └── README.md
+```
 
-Limitaciones conocidas
+## Limitaciones conocidas
 
-El PUSH es simulado mediante un consumidor Artemis y logs; no se conecta a FCM/APNs.
+- El PUSH se simula mediante Artemis y logs; no se conecta a FCM/APNs.
+- Se conserva solamente la última posición por pedido.
+- El inicio y la entrega final se confirman mediante endpoints REST.
+- Algunos timestamps JDBC se serializan como milisegundos Unix.
+- Las credenciales incluidas son valores predeterminados para desarrollo local.
 
-Se almacena únicamente la última posición por pedido, no todo el histórico GPS.
+## Resultado
 
-El inicio y la confirmación final se realizan mediante endpoints REST.
-
-Los timestamps JDBC se serializan actualmente como milisegundos Unix en algunas respuestas.
-
-Las credenciales predeterminadas son solo para desarrollo académico.
-
-La DLQ posee un consumidor mock inmediato; la evidencia se conserva en logs.
-
-Detener el entorno
-
-Sin eliminar datos:
-
-docker compose down
-
-Eliminando también el volumen de PostgreSQL:
-
-docker compose down -v
-
-Referencias
-
-Apache Camel
-
-Enterprise Integration Patterns
-
-ActiveMQ Artemis
-
-Traccar Forwarding
-
-PostgreSQL
-
-Proyecto base
-
-Licencia
-
-Proyecto académico desarrollado para la materia Integración de Sistemas II de la UCOM.
+El proyecto demuestra una integración orientada a eventos con trazabilidad, desacoplamiento mediante mensajería, persistencia, control de estados, idempotencia, tracking GPS y manejo explícito de errores.
