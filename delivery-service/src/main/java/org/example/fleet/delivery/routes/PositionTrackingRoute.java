@@ -308,7 +308,7 @@ public class PositionTrackingRoute extends RouteBuilder {
         }
     }
 
-    private double calcularDistancia(
+    static double calcularDistancia(
             double latitudOrigen,
             double longitudOrigen,
             double latitudDestino,
